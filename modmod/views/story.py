@@ -1,6 +1,7 @@
 import json
 import datetime
 import os.path
+import transaction
 import uuid
 import pyramid_safile
 import logging
@@ -22,6 +23,7 @@ from ..models import (
     StoryFactory,
     StoryTag,
     StoryTagQuery,
+    ProjectExport,
     UserQuery,
     UserReadOiceProgress,
     UserReadOiceProgressQuery,
@@ -44,7 +46,7 @@ from ..config import (
 from ..operations.script_validator import ScriptValidator
 from ..operations.credit import get_story_credit
 from ..operations.image_handler import ComposeOgImage
-from ..operations.worker import KSBuildWorker
+from ..operations.worker import ExportWorker, KSBuildWorker
 from ..operations.block import count_words_of_block
 from ..operations.story import (
     remove_story_localization,
@@ -96,6 +98,13 @@ story_build = Service(name='story_build',
                       renderer='json',
                       factory=StoryFactory,
                       traverse='/{story_id}')
+
+story_id_export = Service(name='story_build',
+                          path='story/{story_id}/export',
+                          renderer='json',
+                          factory=StoryFactory,
+                          traverse='/{story_id}')
+
 story_like = Service(name='story_like',
                      path='story/{story_id}/like',
                      renderer='json',
@@ -413,6 +422,29 @@ def build_story(request):
         'message': 'ok',
         'batchId': batchId,
         'jobCount': len(oices)
+    }
+
+
+@story_id_export.get()
+def export_ks(request):
+    story = request.context
+
+    project_export = ProjectExport(story=story)
+    DBSession.add(project_export)
+    DBSession.flush()
+
+    project_export_id = project_export.id
+
+    # explicitly commit the transaction,
+    # because we want to make sure the worker can find it from DB
+    transaction.commit()
+
+    worker = ExportWorker(project_export_id)
+    worker.run()
+
+    return {
+        'message': 'ok',
+        'id': project_export_id
     }
 
 

@@ -64,20 +64,37 @@ def run_export(_settings,
                                 .filter(ProjectExport.id == story_export_id) \
                                 .one()
 
-        characters = CharacterQuery(DBSession).fetch_by_oice(story_export.oice)
+        if story_export.oice:
+            # Export single oice
+            characters = CharacterQuery(DBSession).fetch_by_oice(story_export.oice)
+            temp_zip = os.path.join(tempfile.mkdtemp(), 'data.zip')
+            exporter = ScriptExporter(
+                _settings["o2.resize_script"],
+                story_export.oice,
+                temp_zip,
+                characters=characters,
+            )
 
-        temp_zip = os.path.join(tempfile.mkdtemp(), 'data.zip')
-        exporter = ScriptExporter(
-            _settings["o2.resize_script"],
-            story_export.oice,
-            temp_zip,
-            characters=characters,
-        )
+            exporter.export()
 
-        exporter.export()
+            factory = pyramid_safile.get_factory()
+            handle = factory.create_handle('data.zip', open(temp_zip, 'rb'))
+        else:
+            # Export multiple oice of a story
+            story_export_path = tempfile.mkdtemp()
+            for oice in story_export.story.oice:
+                characters = CharacterQuery(DBSession).fetch_by_oice(oice)
+                exporter = ScriptExporter(
+                    _settings["o2.resize_script"],
+                    oice,
+                    characters=characters,
+                )
+                oice_export_path = exporter.create_novelspherejs_project_from_oice()
+                shutil.move(oice_export_path, os.path.join(story_export_path, oice.order))
 
-        factory = pyramid_safile.get_factory()
-        handle = factory.create_handle('data.zip', open(temp_zip, 'rb'))
+            factory = pyramid_safile.get_factory()
+            story_zip = os.path.join(story_export_path, 'story.zip')
+            handle = factory.create_handle('story.zip', open(story_zip, 'rb'))
 
         story_export.exported_files = handle
 
